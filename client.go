@@ -1,100 +1,125 @@
 package telnet
 
-
 import (
+	"context"
 	"crypto/tls"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"strings"
 )
 
-
-func DialAndCall(caller Caller) error {
-	conn, err := Dial()
-	if nil != err {
-		return err
+type (
+	// A Caller represents the client end of a TELNET (or TELNETS) connection.
+	//
+	// Writing data to the Writer passed as an argument to the CallTELNET method
+	// will send data to the TELNET (or TELNETS) server.
+	//
+	// Reading data from the Reader passed as an argument to the CallTELNET method
+	// will receive data from the TELNET server.
+	//
+	// The Writer's Write method sends "escaped" TELNET (and TELNETS) data.
+	//
+	// The Reader's Read method "un-escapes" TELNET (and TELNETS) data, and filters
+	// out TELNET (and TELNETS) command sequences.
+	Caller interface {
+		CallTELNET(context.Context, io.Writer, io.Reader)
 	}
 
-	client := &Client{Caller:caller}
+	Client struct {
+		Caller Caller
+		Logger *slog.Logger
+	}
+)
 
-	return client.Call(conn)
-}
-
-
-func DialToAndCall(srvAddr string, caller Caller) error {
-	conn, err := DialTo(srvAddr)
-	if nil != err {
-		return err
+func NewClient(caller Caller, logger *slog.Logger) *Client {
+	if logger == nil {
+		logger = slog.Default()
 	}
 
-	client := &Client{Caller:caller}
-
-	return client.Call(conn)
+	return &Client{Caller: caller, Logger: logger}
 }
-
-
-func DialAndCallTLS(caller Caller, tlsConfig *tls.Config) error {
-	conn, err := DialTLS(tlsConfig)
-	if nil != err {
-		return err
-	}
-
-	client := &Client{Caller:caller}
-
-	return client.Call(conn)
-}
-
-func DialToAndCallTLS(srvAddr string, caller Caller, tlsConfig *tls.Config) error {
-	conn, err := DialToTLS(srvAddr, tlsConfig)
-	if nil != err {
-		return err
-	}
-
-	client := &Client{Caller:caller}
-
-	return client.Call(conn)
-}
-
-
-type Client struct {
-	Caller Caller
-
-	Logger Logger
-}
-
 
 func (client *Client) Call(conn *Conn) error {
-
-	logger := client.logger()
-
-
 	caller := client.Caller
-	if nil == caller {
-		logger.Debug("Defaulted caller to StandardCaller.")
-		caller = StandardCaller
+	if caller == nil {
+		client.Logger.Debug("defaulted caller to EchoCaller")
+		caller = EchoCaller
 	}
 
+	caller.CallTELNET(context.Background(), conn.writer, conn.reader)
 
-	var ctx Context = NewContext().InjectLogger(logger)
-
-	var w Writer = conn
-	var r Reader = conn
-
-	caller.CallTELNET(ctx, w, r)
+	// TODO: should this be closed here? Seems irresponsible to not leave it up to the caller
 	conn.Close()
-
 
 	return nil
 }
 
-
-func (client *Client) logger() Logger {
-	logger := client.Logger
-	if nil == logger {
-		logger = internalDiscardLogger{}
+func DialAndCall(srvAddr string, caller Caller) error {
+	conn, err := Dial("", srvAddr)
+	if err != nil {
+		return err
 	}
 
-	return logger
+	client := NewClient(caller, nil)
+
+	return client.Call(conn)
 }
 
+func DialAndCallTLS(srvAddr string, caller Caller, tlsConfig *tls.Config) error {
+	conn, err := DialTLS("", srvAddr, tlsConfig)
+	if err != nil {
+		return err
+	}
 
-func (client *Client) SetAuth(username string) {
-//@TODO: #################################################
+	client := NewClient(caller, nil)
+
+	return client.Call(conn)
+}
+
+// The CallerFunc type is an adapter to allow the use of ordinary functions as TELNET callers.
+type CallerFunc func(context.Context, io.Writer, io.Reader)
+
+// CallTELNET calls f(ctx, w, r).
+func (f CallerFunc) CallTELNET(ctx context.Context, w io.Writer, r io.Reader) {
+	f(ctx, w, r)
+}
+
+// EchoCaller is a simple TELNET client which sends to the server any data it gets from os.Stdin
+// as TELNET data, and writes any TELNET data it receives from the server to os.Stdout.
+var EchoCaller CallerFunc = func(ctx context.Context, w io.Writer, r io.Reader) {
+	for {
+		serverLine, err := ReadLine(r)
+		if err != nil {
+			if err == io.EOF {
+				fmt.Println("Connection closed by foreign host.")
+				return
+			}
+
+			fmt.Printf("Failed to read from the server: %v\n", err)
+			return
+		}
+
+		if _, err = os.Stdout.WriteString(serverLine); err != nil {
+			fmt.Printf("Failed to write server response to stdout: %v\n", err)
+			return
+		}
+
+		clientLine, err := ReadLine(os.Stdin)
+		if err != nil {
+			fmt.Printf("Failed to read client input: %v\n", err)
+			return
+		}
+
+		if !strings.HasSuffix(clientLine, "\r\n") {
+			// The client may have supplied a new line without a carriage return.
+			clientLine = strings.TrimSuffix(clientLine, "\n") + "\r\n"
+		}
+
+		if err = WriteLine(w, clientLine); err != nil {
+			fmt.Printf("Failed to write to server: %v\n", err)
+			return
+		}
+	}
 }

@@ -1,252 +1,255 @@
-# go-telnet
+# telnet-go
+[![GoDoc](https://godoc.org/github.com/GlobalCyberAlliance/telnet-go?status.svg)](https://godoc.org/github.com/GlobalCyberAlliance/telnet-go)
 
-Package **telnet** provides TELNET and TELNETS client and server implementations, for the Go programming language.
+A Telnet server and client library implementation written in Go. Heavily inspired by the standard library's `net/http` 
+implementation.
 
+_Forked from https://github.com/reiver/go-telnet._
 
-The **telnet** package provides an API in a style similar to the "net/http" library that is part of the Go standard library, including support for "middleware".
+## Get Started
 
+The `telnet-go` library provides low level interfaces for interacting with Telnet data streams, either as a server or 
+client.
 
-(TELNETS is *secure TELNET*, with the TELNET protocol over a secured TLS (or SSL) connection.)
+There's also the `shell` package, which provides a simple Telnet shell server example.
 
+## Setup a Telnet Server
+### Basic Server
 
-## Documention
+Before we can host a server, we need to specify a handler. We provide a sample handler as `telnet.EchoHandler` to
+illustrate how a handler should be written. This handler echoes whatever the client sends, back to the client.
 
-Online documentation, which includes examples, can be found at: http://godoc.org/github.com/reiver/go-telnet
+The following code will serve this handler on your system's primary IP, using port 23 (Telnet's standard port).
 
-[![GoDoc](https://godoc.org/github.com/reiver/go-telnet?status.svg)](https://godoc.org/github.com/reiver/go-telnet)
-
-
-## Very Simple TELNET Server Example
-
-A very very simple TELNET server is shown in the following code.
-
-This particular TELNET server just echos back to the user anything they "submit" to the server.
-
-(By default, a TELNET client does *not* send anything to the server until the [Enter] key is pressed.
-"Submit" means typing something and then pressing the [Enter] key.)
-
-```
+```go
 package main
 
 import (
-	"github.com/reiver/go-telnet"
+	"github.com/GlobalCyberAlliance/telnet-go"
 )
 
 func main() {
-
-	var handler telnet.Handler = telnet.EchoHandler
-	
-	err := telnet.ListenAndServe(":5555", handler)
-	if nil != err {
-		//@TODO: Handle this error better.
+	if err := telnet.ListenAndServe("0.0.0.0:23", telnet.EchoHandler); err != nil {
 		panic(err)
 	}
 }
-
 ```
 
-If you wanted to test out this very very simple TELNET server, if you were on the same computer it was
-running, you could connect to it using the bash command:
+The echo handler simply echoes client text back to the client upon submission. This is what the client would see:
+
+```shell
+~/Projects/globalcyberalliance/telnet-go
+❯ telnet localhost
+Trying ::1...
+Connected to localhost.
+Escape character is '^]'.
+root
+root
+exit
+exit
+^]
+telnet> quit
+Connection closed.
 ```
-telnet localhost 5555
-```
-(Note that we use the same TCP port number -- "5555" -- as we had in our code. That is important, as the
-value used by your TELNET server and the value used by your TELNET client **must** match.)
 
+### Shell Server
 
-## Very Simple (Secure) TELNETS Server Example
+A common use for Telnet is to act as a shell server (similar to SSH). We provide a simple package that showcases how to 
+handle user auth, and how you might want to handle commands.
 
-TELNETS is the secure version of TELNET.
-
-The code to make a TELNETS server is very similar to the code to make a TELNET server. 
-(The difference between we use the `telnet.ListenAndServeTLS` func instead of the
-`telnet.ListenAndServe` func.)
-
-```
+```go
 package main
 
 import (
-	"github.com/reiver/go-telnet"
+	"log"
+
+	"github.com/GlobalCyberAlliance/telnet-go"
+	"github.com/GlobalCyberAlliance/telnet-go/shell"
 )
 
 func main() {
+	authHandler := shell.NewAuthHandler("root", "password", 3)
+	commands := []shell.Command{
+		{
+			Regex:    "^docker$",
+			Response: "\nUsage:  docker [OPTIONS] COMMAND\r\n",
+		},
+		{
+			Regex:    "^docker .*$",
+			Response: "Error response from daemon: dial unix docker.raw.sock: connect: connection refused\r\n",
+		},
+		{
+			Regex:    "^uname$",
+			Response: "Linux\r\n",
+		},
+	}
 
-	var handler telnet.Handler = telnet.EchoHandler
-	
-	err := telnet.ListenAndServeTLS(":5555", "cert.pem", "key.pem", handler)
-	if nil != err {
-		//@TODO: Handle this error better.
-		panic(err)
+	srv := shell.Server{AuthHandler: authHandler, Commands: commands}}
+
+	if err := telnet.ListenAndServe("0.0.0.0:23", srv.HandlerFunc); err != nil {
+		log.Fatal(err)
 	}
 }
-
 ```
 
-If you wanted to test out this very very simple TELNETS server, get the `telnets` client program from here:
-https://github.com/reiver/telnets
+This will serve a simple shell server that accepts `root` and `password` as the username and password respectively, and 
+will permit 3 auth attempts.
 
+By default, the `Command` object exposed here accepts regex, and a single string response. This interface is sufficient 
+for a simple shell interface; however, you can instead use the `GenericHandler` to manually handle this process yourself.
+Here's what that might look like:
 
-## TELNET Client Example:
-```
+```go
 package main
 
 import (
-	"github.com/reiver/go-telnet"
+	"log"
+	"strings"
+
+	"github.com/GlobalCyberAlliance/telnet-go"
+	"github.com/GlobalCyberAlliance/telnet-go/shell"
 )
 
 func main() {
-	var caller telnet.Caller = telnet.StandardCaller
+	authHandler := shell.NewAuthHandler("root", "password", 2)
 
-	//@TOOD: replace "example.net:5555" with address you want to connect to.
-	telnet.DialToAndCall("example.net:5555", caller)
+	srv := shell.Server{AuthHandler: authHandler, GenericHandler: func(command string) string {
+		fields := strings.Fields(command)
+		if len(fields) == 0 {
+			return "missing command\r\n"
+		}
+
+		switch fields[0] {
+		case "docker":
+			return "\nUsage:  docker [OPTIONS] COMMAND\n"
+		}
+
+		return fields[0] + ": command not found\r\n"
+	}}
+
+	if err := telnet.ListenAndServe("0.0.0.0:23", srv.HandlerFunc); err != nil {
+		log.Fatal(err)
+	}
 }
 ```
 
+### Creating a Handler
 
-## TELNETS Client Example:
-```
+Here's a simple handler. You can write directly to the `io.Writer` and read from the `io.Reader`; however, we provide a
+few functions to handle this for you (`telnet.WriteLine` and `telnet.ReadLine` respectively).
+
+This handler will write `Welcome!` to the user, and will await their input. If they send a blank response, the server 
+will close the connection after writing `Goodbye!`. If the user enters anything else, it'll simply echo back `You wrote:
+whatever the user entered`.
+
+```go
 package main
 
 import (
-	"github.com/reiver/go-telnet"
-
-	"crypto/tls"
-)
-
-func main() {
-	//@TODO: Configure the TLS connection here, if you need to.
-	tlsConfig := &tls.Config{}
-
-	var caller telnet.Caller = telnet.StandardCaller
-
-	//@TOOD: replace "example.net:5555" with address you want to connect to.
-	telnet.DialToAndCallTLS("example.net:5555", caller, tlsConfig)
-}
-```
-
-
-##  TELNET Shell Server Example
-
-A more useful TELNET servers can be made using the `"github.com/reiver/go-telnet/telsh"` sub-package.
-
-For example:
-```
-package main
-
-
-import (
-	"github.com/reiver/go-oi"
-	"github.com/reiver/go-telnet"
-	"github.com/reiver/go-telnet/telsh"
-
+	"context"
 	"io"
-	"time"
+
+	"github.com/GlobalCyberAlliance/telnet-go"
 )
 
-
-
-func fiveHandler(stdin io.ReadCloser, stdout io.WriteCloser, stderr io.WriteCloser, args ...string) error {
-	oi.LongWriteString(stdout, "The number FIVE looks like this: 5\r\n")
-
-	return nil
-}
-
-func fiveProducer(ctx telnet.Context, name string, args ...string) telsh.Handler{
-	return telsh.PromoteHandlerFunc(fiveHandler)
-}
-
-
-
-func danceHandler(stdin io.ReadCloser, stdout io.WriteCloser, stderr io.WriteCloser, args ...string) error {
-	for i:=0; i<20; i++ {
-		oi.LongWriteString(stdout, "\r⠋")
-		time.Sleep(50*time.Millisecond)
-
-		oi.LongWriteString(stdout, "\r⠙")
-		time.Sleep(50*time.Millisecond)
-
-		oi.LongWriteString(stdout, "\r⠹")
-		time.Sleep(50*time.Millisecond)
-
-		oi.LongWriteString(stdout, "\r⠸")
-		time.Sleep(50*time.Millisecond)
-
-		oi.LongWriteString(stdout, "\r⠼")
-		time.Sleep(50*time.Millisecond)
-
-		oi.LongWriteString(stdout, "\r⠴")
-		time.Sleep(50*time.Millisecond)
-
-		oi.LongWriteString(stdout, "\r⠦")
-		time.Sleep(50*time.Millisecond)
-
-		oi.LongWriteString(stdout, "\r⠧")
-		time.Sleep(50*time.Millisecond)
-
-		oi.LongWriteString(stdout, "\r⠇")
-		time.Sleep(50*time.Millisecond)
-
-		oi.LongWriteString(stdout, "\r⠏")
-		time.Sleep(50*time.Millisecond)
+func main() {
+	if err := telnet.ListenAndServe("0.0.0.0:23", YourHandlerFunc); err != nil {
+		panic(err)
 	}
-	oi.LongWriteString(stdout, "\r \r\n")
-
-	return nil
 }
 
-func danceProducer(ctx telnet.Context, name string, args ...string) telsh.Handler{
+func YourHandlerFunc(ctx context.Context, w io.Writer, r io.Reader) {
+	if err := telnet.WriteLine(w, "Welcome!\n"); err != nil {
+		return
+	}
 
-	return telsh.PromoteHandlerFunc(danceHandler)
+	for {
+		line, err := telnet.ReadLine(r)
+		if err != nil {
+			return
+		}
+
+		if len(line) == 0 {
+			if err = telnet.WriteLine(w, "Goodbye!\n"); err != nil {
+				return
+			}
+			return
+		}
+
+		if err = telnet.WriteLine(w, "You wrote: "+line+"\n"); err != nil {
+			return
+		}
+	}
+}
+```
+
+### Issuing a Telnet Command
+
+You may need to issue a Telnet command to your client. By default, the `telnet.writer` interprets `IAC` (255) as `IAC 
+IAC` (255, 255), as Telnet requires this for data streams. To workaround this, we expose a `telnet.WriteCommand` function.
+This function prepends `telnet.commandSignature()` to the beginning of the byte slice, to signal to the internal 
+`telnet.writer.Write()` function to not escape the upcoming `IAC` (255) byte.
+
+We make use of this in the `shell.AuthHandler` to mask the user's password during the login process:
+```go
+if err = telnet.WriteLine(w, "Password: "); err != nil {
+    return false
 }
 
+// Enable ECHO to hide the user password.
+if _, err = telnet.WriteCommand(w, telnet.IAC, telnet.WILL, telnet.ECHO); err != nil {
+    return false
+}
+
+userPassword, err := telnet.ReadLine(r)
+if err != nil {
+    return false
+}
+
+// Disable ECHO.
+if _, err = telnet.WriteCommand(w, telnet.IAC, telnet.WONT, telnet.ECHO); err != nil {
+    return false
+}
+```
+
+## Setup a Telnet Client
+
+Similarly to setting up a server, before we open a client connection we need to specify a caller. We provide a sample
+caller as `telnet.EchoCaller` to illustrate how a caller should be written. This caller sends data from `os.Stdin` to 
+the given Telnet server, and echoes back the server's response to `os.Stdout`.
+
+The following code will use this caller to handle calling a Telnet server listening on the localhost. The Telnet server 
+in our example is a simple handler that repeats the client's submission back to them, with `You wrote: ` prepended.
+
+```go
+package main
+
+import (
+	"github.com/GlobalCyberAlliance/telnet-go"
+)
 
 func main() {
-
-	shellHandler := telsh.NewShellHandler()
-
-	shellHandler.WelcomeMessage = `
- __          __ ______  _        _____   ____   __  __  ______ 
- \ \        / /|  ____|| |      / ____| / __ \ |  \/  ||  ____|
-  \ \  /\  / / | |__   | |     | |     | |  | || \  / || |__   
-   \ \/  \/ /  |  __|  | |     | |     | |  | || |\/| ||  __|  
-    \  /\  /   | |____ | |____ | |____ | |__| || |  | || |____ 
-     \/  \/    |______||______| \_____| \____/ |_|  |_||______|
-
-`
-
-
-	// Register the "five" command.
-	commandName     := "five"
-	commandProducer := telsh.ProducerFunc(fiveProducer)
-
-	shellHandler.Register(commandName, commandProducer)
-
-
-
-	// Register the "dance" command.
-	commandName      = "dance"
-	commandProducer  = telsh.ProducerFunc(danceProducer)
-
-	shellHandler.Register(commandName, commandProducer)
-
-
-
-	shellHandler.Register("dance", telsh.ProducerFunc(danceProducer))
-
-	addr := ":5555"
-	if err := telnet.ListenAndServe(addr, shellHandler); nil != err {
+	if err := telnet.DialAndCall("localhost:23", telnet.EchoCaller); err != nil {
 		panic(err)
 	}
 }
 ```
 
-TELNET servers made using the `"github.com/reiver/go-telnet/telsh"` sub-package will often be more useful
-as it makes it easier for you to create a *shell* interface.
+This is what the client would see:
 
+```shell
+Welcome!
+hello
+You wrote: hello
+this is a test
+You wrote: this is a test
+```
 
-# More Information
+_Note: The stock `telnet.EchoCaller` uses the `telnet.ReadLine` function, which isn't ideal for interacting with a 
+server's response. It relies on the server ending its data stream with a newline; however, the server may not do this
+(for example, if it's sending an auth prompt)._
 
-There is a lot more information about documentation on all this here: http://godoc.org/github.com/reiver/go-telnet
+## Notes
 
-(You should really read those.)
-
+This fork refactored a lot of the original author's codebase to have a cleaner and easier to use API. We required the 
+server implementation internally, so the client implementation still needs some work (as we didn't really need it).
