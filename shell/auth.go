@@ -2,7 +2,6 @@ package shell
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"strconv"
 	"time"
@@ -16,7 +15,6 @@ type AuthHandler func(ctx context.Context, w io.Writer, r io.Reader) bool
 func NewAuthHandler(username string, password string, maxAttempts int) AuthHandler {
 	return func(ctx context.Context, w io.Writer, r io.Reader) bool {
 		for attempts := 0; attempts < maxAttempts; attempts++ {
-			fmt.Println("WRITING LOGIN")
 			if err := telnet.WriteLine(w, "Login: "); err != nil {
 				return false
 			}

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"runtime/debug"
+	"time"
 )
 
 // ListenAndServe listens on the TCP network address 'addr' and then spawns a call to ServeTELNET
@@ -22,13 +23,25 @@ func Serve(listener net.Listener, handler HandlerFunc) error {
 	return server.Serve(listener)
 }
 
-// Server defines parameters of a running TELNET server.
-type Server struct {
-	Handler   HandlerFunc  // handler to invoke; default is telnet.EchoHandler if nil
-	TLSConfig *tls.Config  // optional TLS configuration; used by ListenAndServeTLS
-	logger    *slog.Logger // optional logger
-	Addr      string       // TCP address to listen on; ":telnet" or ":telnets" if empty (used with ListenAndServe or ListenAndServeTLS respectively).
-}
+type (
+	// Server defines parameters of a running TELNET server.
+	Server struct {
+		ConnCallback func(ctx context.Context, conn net.Conn) net.Conn // optional callback for wrapping net.Conn before handling
+		Handler      HandlerFunc                                       // handler to invoke; default is telnet.EchoHandler if nil
+		TLSConfig    *tls.Config                                       // optional TLS configuration; used by ListenAndServeTLS
+		logger       *slog.Logger                                      // optional logger
+		Addr         string                                            // TCP address to listen on; ":telnet" or ":telnets" if empty (used with ListenAndServe or ListenAndServeTLS respectively).
+		Timeout      time.Duration
+	}
+
+	// serverConn is used to wrap a handle with context.
+	serverConn struct {
+		net.Conn
+
+		ctx    context.Context
+		cancel context.CancelFunc
+	}
+)
 
 // ListenAndServe listens on the TCP network address 'server.Addr' and then spawns a call to Serve
 // method on 'server.Handler' to serve each incoming connection.
@@ -57,9 +70,27 @@ func (server *Server) Serve(listener net.Listener) error {
 	}
 
 	for {
-		conn, err := listener.Accept()
+		rawConn, err := listener.Accept()
 		if err != nil {
 			return err
+		}
+
+		var ctx context.Context
+		var cancel context.CancelFunc
+
+		if server.Timeout > 0 {
+			ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(server.Timeout))
+		} else {
+			ctx, cancel = context.WithCancel(context.Background())
+		}
+
+		if server.ConnCallback != nil {
+			rawConn = server.ConnCallback(ctx, rawConn)
+		}
+
+		conn := serverConn{
+			Conn:   rawConn,
+			cancel: cancel,
 		}
 
 		server.logger.Debug("received new connection", "FROM", conn.RemoteAddr().String())
@@ -74,8 +105,9 @@ func (server *Server) SetLogger(logger *slog.Logger) {
 }
 
 // handle manages the lifecycle of a TELNET client connection.
-func (server *Server) handle(conn net.Conn, handler HandlerFunc) {
+func (server *Server) handle(conn serverConn, handler HandlerFunc) {
 	defer conn.Close()
+	defer conn.cancel()
 
 	defer func() {
 		if recovery := recover(); recovery != nil {
@@ -93,7 +125,7 @@ func (server *Server) handle(conn net.Conn, handler HandlerFunc) {
 		return
 	}
 
-	handler.ServeTELNET(context.WithValue(context.Background(), "conn", conn), w, r)
+	handler.ServeTELNET(conn.ctx, w, r)
 }
 
 // The HandlerFunc type is an adapter to allow the use of ordinary functions as TELNET handlers.
