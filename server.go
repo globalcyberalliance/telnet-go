@@ -107,7 +107,12 @@ func (server *Server) SetLogger(logger *slog.Logger) {
 // handle manages the lifecycle of a TELNET client connection.
 func (server *Server) handle(conn serverConn, handler HandlerFunc) {
 	defer conn.Close()
-	defer conn.cancel()
+
+	// Leave a slight delay to close the context (needed to allow the connection to gracefully close).
+	defer func() {
+		time.Sleep(250 * time.Millisecond)
+		conn.cancel()
+	}()
 
 	defer func() {
 		if recovery := recover(); recovery != nil {
