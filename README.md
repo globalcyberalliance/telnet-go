@@ -158,25 +158,25 @@ func main() {
 	}
 }
 
-func YourHandlerFunc(ctx context.Context, w io.Writer, r io.Reader) {
-	if err := telnet.WriteLine(w, "Welcome!\n"); err != nil {
+func YourHandlerFunc(session *telnet.Session) {
+	if err := session.WriteLine("Welcome!\n"); err != nil {
 		return
 	}
 
 	for {
-		line, err := telnet.ReadLine(r)
+		line, err := session.ReadLine()
 		if err != nil {
 			return
 		}
 
 		if len(line) == 0 {
-			if err = telnet.WriteLine(w, "Goodbye!\n"); err != nil {
+			if err = session.WriteLine("Goodbye!\n"); err != nil {
 				return
 			}
 			return
 		}
 
-		if err = telnet.WriteLine(w, "You wrote: "+line+"\n"); err != nil {
+		if err = session.WriteLine("You wrote: "+line+"\n"); err != nil {
 			return
 		}
 	}

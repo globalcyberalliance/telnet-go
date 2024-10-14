@@ -79,12 +79,12 @@ func (w *writer) Write(data []byte) (n int, err error) {
 		}
 
 		// Write escape IAC sequence.
-		numWritten, err := LongWrite(w.writer, w.EscapeIAC())
+		numWritten, err := LongWrite(w.writer, w.escapeIAC())
 		if err != nil {
 			return n, err
 		}
 
-		if int(numWritten) != len(w.EscapeIAC()) {
+		if int(numWritten) != len(w.escapeIAC()) {
 			return n, errors.New("partial IAC IAC write")
 		}
 
@@ -103,7 +103,7 @@ func (w *writer) Write(data []byte) (n int, err error) {
 	return n, nil
 }
 
-func (w *writer) EscapeIAC() []byte {
+func (w *writer) escapeIAC() []byte {
 	return []byte{IAC, IAC}
 }
 

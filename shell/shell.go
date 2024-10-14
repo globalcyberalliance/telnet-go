@@ -1,9 +1,7 @@
 package shell
 
 import (
-	"context"
 	"fmt"
-	"io"
 	"regexp"
 	"strings"
 
@@ -41,36 +39,36 @@ type (
 	}
 )
 
-func (s *Server) HandlerFunc(ctx context.Context, w io.Writer, r io.Reader) {
+func (s *Server) HandlerFunc(session *telnet.Session) {
 	// If the AuthHandler is configured and the user fails login, return.
-	if s.AuthHandler != nil && s.AuthHandler(ctx, w, r) == false {
+	if s.AuthHandler != nil && s.AuthHandler(session) == false {
 		return
 	}
 
-	if err := telnet.WriteLine(w, DefaultWelcomeMessage); err != nil {
+	if err := session.WriteLine(DefaultWelcomeMessage); err != nil {
 		return
 	}
 
 	for {
-		if err := telnet.WriteLine(w, DefaultPrompt); err != nil {
+		if err := session.WriteLine(DefaultPrompt); err != nil {
 			return
 		}
 
-		line, err := telnet.ReadLine(r)
+		line, err := session.ReadLine()
 		if err != nil {
 			return
 		}
 
 		fields := strings.Split(line, " ")
 		if len(fields) == 0 {
-			if err = telnet.WriteLine(w, DefaultExitMessage); err != nil {
+			if err = session.WriteLine(DefaultExitMessage); err != nil {
 				return
 			}
 			return
 		}
 
 		if fields[0] == DefaultExitCommand {
-			if err = telnet.WriteLine(w, DefaultExitMessage); err != nil {
+			if err = session.WriteLine(DefaultExitMessage); err != nil {
 				return
 			}
 			return
@@ -86,7 +84,7 @@ func (s *Server) HandlerFunc(ctx context.Context, w io.Writer, r io.Reader) {
 			}
 
 			if matched {
-				if err = telnet.WriteLine(w, command.Response); err != nil {
+				if err = session.WriteLine(command.Response); err != nil {
 					return
 				}
 				break
@@ -95,11 +93,11 @@ func (s *Server) HandlerFunc(ctx context.Context, w io.Writer, r io.Reader) {
 
 		if !matched {
 			if s.GenericHandler != nil {
-				if err = telnet.WriteLine(w, s.GenericHandler(line)); err != nil {
+				if err = session.WriteLine(s.GenericHandler(line)); err != nil {
 					return
 				}
 			} else {
-				if err = telnet.WriteLine(w, fields[0], DefaultCommandNotFound); err != nil {
+				if err = session.WriteLine(fields[0], DefaultCommandNotFound); err != nil {
 					return
 				}
 			}

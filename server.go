@@ -3,7 +3,6 @@ package telnet
 import (
 	"context"
 	"crypto/tls"
-	"io"
 	"log/slog"
 	"net"
 	"runtime/debug"
@@ -130,28 +129,33 @@ func (server *Server) handle(conn serverConn, handler HandlerFunc) {
 		return
 	}
 
-	handler.ServeTELNET(conn.ctx, w, r)
+	handler.ServeTELNET(&Session{
+		ctx:    conn.ctx,
+		Conn:   conn,
+		reader: r,
+		writer: w,
+	})
 }
 
 // The HandlerFunc type is an adapter to allow the use of ordinary functions as TELNET handlers.
-type HandlerFunc func(context.Context, io.Writer, io.Reader)
+type HandlerFunc func(server *Session)
 
 // ServeTELNET calls f(ctx, w, r).
-func (f HandlerFunc) ServeTELNET(ctx context.Context, w io.Writer, r io.Reader) {
-	f(ctx, w, r)
+func (f HandlerFunc) ServeTELNET(session *Session) {
+	f(session)
 }
 
 // EchoHandler is a simple TELNET server which "echos" back to the client any (non-command)
 // data back to the TELNET client, it received from the TELNET client.
-var EchoHandler HandlerFunc = func(ctx context.Context, w io.Writer, r io.Reader) {
+var EchoHandler HandlerFunc = func(session *Session) {
 	// Buffer needs to be small to avoid waiting for it to fill up.
 	var buffer [1]byte
 	p := buffer[:]
 
 	for {
-		n, err := r.Read(p)
+		n, err := session.Read(p)
 		if n > 0 {
-			if _, err := w.Write(p[:n]); err != nil {
+			if _, err := session.Write(p[:n]); err != nil {
 				return
 			}
 		}
