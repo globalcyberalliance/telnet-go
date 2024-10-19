@@ -285,10 +285,11 @@ func TestEchoHandler(t *testing.T) {
 
 		var buffer bytes.Buffer
 
-		writer := newWriter(&buffer)
-		reader := newReader(bytes.NewReader(test.Bytes))
-
-		EchoHandler.ServeTELNET(ctx, writer, reader)
+		EchoHandler.ServeTELNET(&Session{
+			ctx:    ctx,
+			reader: newReader(bytes.NewReader(test.Bytes)),
+			writer: newWriter(&buffer),
+		})
 
 		if expected, actual := string(test.Expected), buffer.String(); expected != actual {
 			t.Errorf("For test #%d, expected %q, but actually got %q.", testNumber, expected, actual)

@@ -41,7 +41,7 @@ type (
 
 func (s *Server) HandlerFunc(session *telnet.Session) {
 	// If the AuthHandler is configured and the user fails login, return.
-	if s.AuthHandler != nil && s.AuthHandler(session) == false {
+	if s.AuthHandler != nil && !s.AuthHandler(session) {
 		return
 	}
 

@@ -44,7 +44,6 @@ func (server *Server) ListenAndServeTLS(certFile string, keyFile string) error {
 			InsecureSkipVerify:     server.TLSConfig.InsecureSkipVerify,
 			CipherSuites:           server.TLSConfig.CipherSuites,
 			SessionTicketsDisabled: server.TLSConfig.SessionTicketsDisabled,
-			SessionTicketKey:       server.TLSConfig.SessionTicketKey,
 			ClientSessionCache:     server.TLSConfig.ClientSessionCache,
 			MinVersion:             server.TLSConfig.MinVersion,
 			MaxVersion:             server.TLSConfig.MaxVersion,

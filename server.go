@@ -3,9 +3,12 @@ package telnet
 import (
 	"context"
 	"crypto/tls"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"runtime/debug"
+	"sync"
 	"time"
 )
 
@@ -25,12 +28,15 @@ func Serve(listener net.Listener, handler HandlerFunc) error {
 type (
 	// Server defines parameters of a running TELNET server.
 	Server struct {
+		listener     net.Listener
 		ConnCallback func(ctx context.Context, conn net.Conn) net.Conn // optional callback for wrapping net.Conn before handling
 		Handler      HandlerFunc                                       // handler to invoke; default is telnet.EchoHandler if nil
 		TLSConfig    *tls.Config                                       // optional TLS configuration; used by ListenAndServeTLS
 		logger       *slog.Logger                                      // optional logger
-		Addr         string                                            // TCP address to listen on; ":telnet" or ":telnets" if empty (used with ListenAndServe or ListenAndServeTLS respectively).
+		handles      map[string]context.CancelFunc
+		Addr         string // TCP address to listen on; ":23" or ":992" if empty (used with ListenAndServe or ListenAndServeTLS respectively).
 		Timeout      time.Duration
+		handlesMu    sync.Mutex
 	}
 
 	// serverConn is used to wrap a handle with context.
@@ -47,7 +53,7 @@ type (
 func (server *Server) ListenAndServe() error {
 	addr := server.Addr
 	if addr == "" {
-		addr = ":telnet"
+		addr = ":23"
 	}
 
 	listener, err := net.Listen("tcp", addr)
@@ -60,7 +66,13 @@ func (server *Server) ListenAndServe() error {
 
 // Serve accepts an incoming TELNET client connection on the net.Listener 'listener'.
 func (server *Server) Serve(listener net.Listener) error {
+	if server.listener != nil {
+		return errors.New("server already listening")
+	}
+
 	defer listener.Close()
+	server.listener = listener
+	server.handles = make(map[string]context.CancelFunc)
 
 	handler := server.Handler
 	if handler == nil {
@@ -90,6 +102,7 @@ func (server *Server) Serve(listener net.Listener) error {
 		conn := serverConn{
 			Conn:   rawConn,
 			cancel: cancel,
+			ctx:    ctx,
 		}
 
 		server.logger.Debug("received new connection", "FROM", conn.RemoteAddr().String())
@@ -103,20 +116,57 @@ func (server *Server) SetLogger(logger *slog.Logger) {
 	server.logger = logger
 }
 
+func (server *Server) Shutdown() error {
+	if err := server.listener.Close(); err != nil {
+		return fmt.Errorf("failed to close listener: %w", err)
+	}
+
+	wg := sync.WaitGroup{}
+	wg.Add(len(server.handles))
+
+	for _, cancel := range server.handles {
+		go func() {
+			defer wg.Done()
+			cancel()
+		}()
+	}
+
+	wg.Wait()
+
+	return nil
+}
+
 // handle manages the lifecycle of a TELNET client connection.
 func (server *Server) handle(conn serverConn, handler HandlerFunc) {
 	defer conn.Close()
 
 	// Leave a slight delay to close the context (needed to allow the connection to gracefully close).
 	defer func() {
-		time.Sleep(250 * time.Millisecond)
-		conn.cancel()
-	}()
-
-	defer func() {
 		if recovery := recover(); recovery != nil {
 			server.logger.Error("recovered from handle panic", "recovered", recovery, "stack", string(debug.Stack()))
 		}
+	}()
+
+	// Close the handle if context is cancelled.
+	go func() {
+		server.handlesMu.Lock()
+		server.handles[conn.RemoteAddr().String()] = conn.cancel
+		server.handlesMu.Unlock()
+
+		<-conn.ctx.Done()
+		server.logger.Debug("received context completion, closing telnet connection", "from", conn.RemoteAddr().String())
+
+		if err := conn.Conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			server.logger.Error("failed to close telnet connection", "from", conn.RemoteAddr().String(), "err", err)
+		}
+
+		server.handlesMu.Lock()
+		delete(server.handles, conn.RemoteAddr().String())
+		server.handlesMu.Unlock()
+	}()
+
+	defer func() {
+		conn.cancel()
 	}()
 
 	r := newReader(conn)
