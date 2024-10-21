@@ -117,8 +117,10 @@ func (server *Server) SetLogger(logger *slog.Logger) {
 }
 
 func (server *Server) Shutdown() error {
-	if err := server.listener.Close(); err != nil {
-		return fmt.Errorf("failed to close listener: %w", err)
+	if server.listener != nil {
+		if err := server.listener.Close(); err != nil {
+			return fmt.Errorf("failed to close listener: %w", err)
+		}
 	}
 
 	wg := sync.WaitGroup{}
