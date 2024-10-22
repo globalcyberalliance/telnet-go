@@ -1,5 +1,5 @@
 # telnet-go
-[![GoDoc](https://godoc.org/github.com/GlobalCyberAlliance/telnet-go?status.svg)](https://godoc.org/github.com/GlobalCyberAlliance/telnet-go)
+[![GoDoc](https://godoc.org/github.com/globalcyberalliance/telnet-go?status.svg)](https://godoc.org/github.com/globalcyberalliance/telnet-go)
 
 A Telnet server and client library implementation written in Go. Heavily inspired by the standard library's `net/http` 
 implementation.
@@ -25,7 +25,7 @@ The following code will serve this handler on your system's primary IP, using po
 package main
 
 import (
-	"github.com/GlobalCyberAlliance/telnet-go"
+	"github.com/globalcyberalliance/telnet-go"
 )
 
 func main() {
@@ -63,8 +63,8 @@ package main
 import (
 	"log"
 
-	"github.com/GlobalCyberAlliance/telnet-go"
-	"github.com/GlobalCyberAlliance/telnet-go/shell"
+	"github.com/globalcyberalliance/telnet-go"
+	"github.com/globalcyberalliance/telnet-go/shell"
 )
 
 func main() {
@@ -106,8 +106,8 @@ import (
 	"log"
 	"strings"
 
-	"github.com/GlobalCyberAlliance/telnet-go"
-	"github.com/GlobalCyberAlliance/telnet-go/shell"
+	"github.com/globalcyberalliance/telnet-go"
+	"github.com/globalcyberalliance/telnet-go/shell"
 )
 
 func main() {
@@ -149,7 +149,7 @@ import (
 	"context"
 	"io"
 
-	"github.com/GlobalCyberAlliance/telnet-go"
+	"github.com/globalcyberalliance/telnet-go"
 )
 
 func main() {
@@ -225,7 +225,7 @@ in our example is a simple handler that repeats the client's submission back to 
 package main
 
 import (
-	"github.com/GlobalCyberAlliance/telnet-go"
+	"github.com/globalcyberalliance/telnet-go"
 )
 
 func main() {
