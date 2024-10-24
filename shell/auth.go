@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/GlobalCyberAlliance/telnet-go"
+	"github.com/globalcyberalliance/telnet-go"
 )
 
 type AuthHandler func(session *telnet.Session) bool
