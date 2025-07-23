@@ -98,10 +98,16 @@ func (server *Server) Serve(listener net.Listener) error {
 
 		if server.ConnContext != nil {
 			ctx = server.ConnContext(ctx, rawConn)
+			if ctx == nil {
+				panic("ConnContext returned nil")
+			}
 		}
 
 		if server.ConnCallback != nil {
 			rawConn = server.ConnCallback(ctx, rawConn)
+			if rawConn == nil {
+				panic("ConnCallback returned nil")
+			}
 		}
 
 		conn := serverConn{
