@@ -96,17 +96,17 @@ func (server *Server) Serve(listener net.Listener) error {
 			ctx, cancel = context.WithCancel(context.Background())
 		}
 
-		if server.ConnContext != nil {
-			ctx = server.ConnContext(ctx, rawConn)
-			if ctx == nil {
-				panic("ConnContext returned nil")
-			}
-		}
-
 		if server.ConnCallback != nil {
 			rawConn = server.ConnCallback(ctx, rawConn)
 			if rawConn == nil {
 				panic("ConnCallback returned nil")
+			}
+		}
+
+		if server.ConnContext != nil {
+			ctx = server.ConnContext(ctx, rawConn)
+			if ctx == nil {
+				panic("ConnContext returned nil")
 			}
 		}
 
