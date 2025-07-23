@@ -29,10 +29,11 @@ type (
 	// Server defines parameters of a running TELNET server.
 	Server struct {
 		listener     net.Listener
-		ConnCallback func(ctx context.Context, conn net.Conn) net.Conn // optional callback for wrapping net.Conn before handling
-		Handler      HandlerFunc                                       // handler to invoke; default is telnet.EchoHandler if nil
-		TLSConfig    *tls.Config                                       // optional TLS configuration; used by ListenAndServeTLS
-		logger       *slog.Logger                                      // optional logger
+		ConnCallback func(ctx context.Context, conn net.Conn) net.Conn        // optional callback for wrapping net.Conn before handling
+		ConnContext  func(ctx context.Context, conn net.Conn) context.Context // optional callback for wrapping context.Context before handling
+		Handler      HandlerFunc                                              // handler to invoke; default is telnet.EchoHandler if nil
+		TLSConfig    *tls.Config                                              // optional TLS configuration; used by ListenAndServeTLS
+		logger       *slog.Logger                                             // optional logger
 		handles      map[string]context.CancelFunc
 		Addr         string // TCP address to listen on; ":23" or ":992" if empty (used with ListenAndServe or ListenAndServeTLS respectively).
 		Timeout      time.Duration
@@ -93,6 +94,10 @@ func (server *Server) Serve(listener net.Listener) error {
 			ctx, cancel = context.WithDeadline(context.Background(), time.Now().Add(server.Timeout))
 		} else {
 			ctx, cancel = context.WithCancel(context.Background())
+		}
+
+		if server.ConnContext != nil {
+			ctx = server.ConnContext(ctx, rawConn)
 		}
 
 		if server.ConnCallback != nil {
