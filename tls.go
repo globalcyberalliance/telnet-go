@@ -2,6 +2,8 @@ package telnet
 
 import (
 	"crypto/tls"
+	"errors"
+	"fmt"
 	"net"
 )
 
@@ -20,7 +22,7 @@ func ListenAndServeTLS(addr string, certFile string, keyFile string, handler Han
 func (server *Server) ListenAndServeTLS(certFile string, keyFile string) error {
 	addr := server.Addr
 	if addr == "" {
-		addr = ":telnets"
+		addr = ":992"
 	}
 
 	listener, err := net.Listen("tcp", addr)
@@ -28,40 +30,24 @@ func (server *Server) ListenAndServeTLS(certFile string, keyFile string) error {
 		return err
 	}
 
-	tlsConfig := &tls.Config{}
-
-	if server.TLSConfig != nil {
-		tlsConfig = &tls.Config{
-			Rand:                   server.TLSConfig.Rand,
-			Time:                   server.TLSConfig.Time,
-			Certificates:           server.TLSConfig.Certificates,
-			GetCertificate:         server.TLSConfig.GetCertificate,
-			RootCAs:                server.TLSConfig.RootCAs,
-			NextProtos:             server.TLSConfig.NextProtos,
-			ServerName:             server.TLSConfig.ServerName,
-			ClientAuth:             server.TLSConfig.ClientAuth,
-			ClientCAs:              server.TLSConfig.ClientCAs,
-			InsecureSkipVerify:     server.TLSConfig.InsecureSkipVerify,
-			CipherSuites:           server.TLSConfig.CipherSuites,
-			SessionTicketsDisabled: server.TLSConfig.SessionTicketsDisabled,
-			ClientSessionCache:     server.TLSConfig.ClientSessionCache,
-			MinVersion:             server.TLSConfig.MinVersion,
-			MaxVersion:             server.TLSConfig.MaxVersion,
-			CurvePreferences:       server.TLSConfig.CurvePreferences,
-		}
+	if server.TLSConfig == nil {
+		server.TLSConfig = &tls.Config{}
 	}
 
-	tlsConfigHasCertificate := len(tlsConfig.Certificates) > 0 || nil != tlsConfig.GetCertificate
-	if certFile == "" || keyFile == "" || !tlsConfigHasCertificate {
-		tlsConfig.Certificates = make([]tls.Certificate, 1)
+	if len(server.TLSConfig.Certificates) == 0 {
+		if certFile == "" && keyFile == "" {
+			return errors.New("missing certificate file and key file")
+		}
 
-		tlsConfig.Certificates[0], err = tls.LoadX509KeyPair(certFile, keyFile)
+		tlsCert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to load key pair: %w", err)
 		}
+
+		server.TLSConfig.Certificates = []tls.Certificate{tlsCert}
 	}
 
-	tlsListener := tls.NewListener(listener, tlsConfig)
+	tlsListener := tls.NewListener(listener, server.TLSConfig)
 
 	return server.Serve(tlsListener)
 }
