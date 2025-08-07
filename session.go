@@ -1,6 +1,7 @@
 package telnet
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -9,7 +10,8 @@ import (
 )
 
 type Session struct {
-	ctx context.Context
+	ctx   context.Context
+	isPTY bool // Used to normalize line formatting.
 	net.Conn
 	*reader
 	*writer
@@ -139,7 +141,28 @@ func (s *Session) RequestWindowSize() error {
 	}
 }
 
-func (s *Session) Write(data []byte) (n int, err error) {
+// SetIsPTY is only used for line formatting for the Write function since we don't support terminal modes.
+func (s *Session) SetIsPTY(isPTY bool) {
+	s.isPTY = isPTY
+}
+
+func (s *Session) Write(data []byte) (int, error) {
+	if s.isPTY {
+		originalLength := len(data)
+
+		// Normalize \n to \r\n when pty is accepted.
+		// This is a hardcoded shortcut since we don't support terminal modes.
+		data = bytes.Replace(data, []byte{'\n'}, []byte{'\r', '\n'}, -1)
+		data = bytes.Replace(data, []byte{'\r', '\r', '\n'}, []byte{'\r', '\n'}, -1)
+
+		bytesWritten, err := s.writer.Write(data)
+		if bytesWritten > originalLength {
+			bytesWritten = originalLength
+		}
+
+		return bytesWritten, err
+	}
+
 	return s.writer.Write(data)
 }
 
