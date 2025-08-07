@@ -12,6 +12,7 @@ const (
 	SGA      byte = 3
 	NL       byte = 10 // New line.
 	CR       byte = 13 // Carriage return.
+	NAWS     byte = 31
 	LINEMODE byte = 34
 	SE       byte = 240
 	SB       byte = 250
@@ -162,4 +163,60 @@ func ReadLine(reader io.Reader) (string, error) {
 	}
 
 	return line.String(), nil
+}
+
+// Subnegotiation contains the option and payload of a Telnet SB...SE block.
+type Subnegotiation struct {
+	Option  byte
+	Payload []byte // unescaped (IAC IAC → IAC)
+}
+
+// ReadSubnegotiation waits for and returns the next subnegotiation block.
+func (r *reader) ReadSubnegotiation() (*Subnegotiation, error) {
+	for {
+		b, err := r.buffered.ReadByte()
+		if err != nil {
+			return nil, err
+		}
+		if b == IAC {
+			next, err := r.buffered.ReadByte()
+			if err != nil {
+				return nil, err
+			}
+			if next == SB {
+				option, err := r.buffered.ReadByte()
+				if err != nil {
+					return nil, err
+				}
+				payload := make([]byte, 0, 8)
+
+			subloop:
+				for {
+					c, err := r.buffered.ReadByte()
+					if err != nil {
+						return nil, err
+					}
+					if c == IAC {
+						// Peek ahead to see if this is IAC SE or an escaped IAC.
+						d, err := r.buffered.ReadByte()
+						if err != nil {
+							return nil, err
+						}
+
+						if d == SE {
+							break subloop
+						} else if d == IAC {
+							payload = append(payload, IAC)
+						} else {
+							// Protocol error, but skip.
+							continue
+						}
+					} else {
+						payload = append(payload, c)
+					}
+				}
+				return &Subnegotiation{Option: option, Payload: payload}, nil
+			}
+		}
+	}
 }
