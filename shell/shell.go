@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/globalcyberalliance/telnet-go"
+	"arcadium.dev/telnet"
 )
 
 const (

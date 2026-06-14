@@ -1,4 +1,4 @@
-package telnet
+package telnet // import "arcadium.dev/telnet"
 
 import (
 	"bufio"

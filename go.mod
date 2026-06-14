@@ -1,3 +1,3 @@
-module github.com/globalcyberalliance/telnet-go
+module arcadium.dev/telnet
 
-go 1.22.2
+go 1.26.4
