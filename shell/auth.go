@@ -12,7 +12,7 @@ type AuthHandler func(session *telnet.Session) bool
 // NewAuthHandler returns an AuthHandler with the given configuration.
 func NewAuthHandler(username string, password string, maxAttempts int) AuthHandler {
 	return func(session *telnet.Session) bool {
-		for attempts := 0; attempts < maxAttempts; attempts++ {
+		for range maxAttempts {
 			if err := session.WriteLine("Login: "); err != nil {
 				return false
 			}

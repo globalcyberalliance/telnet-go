@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 )
 
@@ -12,7 +13,7 @@ import (
 // This enables 'secured telnet' (TELNETS), typically on port 992 by default,
 // though this can be overridden using the 'addr' argument.
 func ListenAndServeTLS(addr string, certFile string, keyFile string, handler HandlerFunc) error {
-	server := &Server{Addr: addr, Handler: handler}
+	server := &Server{Addr: addr, Handler: handler, logger: slog.New(slog.DiscardHandler)}
 	return server.ListenAndServeTLS(certFile, keyFile)
 }
 

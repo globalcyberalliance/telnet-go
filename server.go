@@ -15,13 +15,13 @@ import (
 // ListenAndServe listens on the TCP network address 'addr' and then spawns a call to ServeTELNET
 // method on 'handler' to serve each incoming connection.
 func ListenAndServe(addr string, handler HandlerFunc) error {
-	server := &Server{Addr: addr, Handler: handler, logger: slog.Default()}
+	server := &Server{Addr: addr, Handler: handler, logger: slog.New(slog.DiscardHandler)}
 	return server.ListenAndServe()
 }
 
 // Serve accepts an incoming TELNET or TELNETS client connection on the net.Listener 'listener'.
 func Serve(listener net.Listener, handler HandlerFunc) error {
-	server := &Server{Handler: handler, logger: slog.Default()}
+	server := &Server{Handler: handler, logger: slog.New(slog.DiscardHandler)}
 	return server.Serve(listener)
 }
 
@@ -69,6 +69,10 @@ func (server *Server) ListenAndServe() error {
 func (server *Server) Serve(listener net.Listener) error {
 	if server.listener != nil {
 		return errors.New("server already listening")
+	}
+
+	if server.logger == nil {
+		server.logger = slog.New(slog.DiscardHandler)
 	}
 
 	defer listener.Close()
