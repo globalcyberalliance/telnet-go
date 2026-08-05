@@ -156,13 +156,10 @@ func ReadLine(reader io.Reader) (string, error) {
 		}
 	}
 
-	// Remove the \r\n from the end of the string.
-	lineBytes := line.Bytes()
-	if len(lineBytes) >= 2 && lineBytes[len(lineBytes)-2] == '\r' && lineBytes[len(lineBytes)-1] == '\n' {
-		return string(lineBytes[:len(lineBytes)-2]), nil
-	}
-
-	return line.String(), nil
+	// Remove the line terminator. RFC 854 mandates CRLF, but plenty of clients send a bare LF, so
+	// trim whichever turned up. Leaving a lone \n attached silently breaks callers that compare
+	// or pattern-match the result (e.g. auth handlers).
+	return string(bytes.TrimRight(line.Bytes(), "\r\n")), nil
 }
 
 // Subnegotiation contains the option and payload of a Telnet SB...SE block.

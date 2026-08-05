@@ -306,3 +306,62 @@ func TestReader_Read(t *testing.T) {
 		}
 	}
 }
+
+func TestReadLine(t *testing.T) {
+	tests := []struct {
+		Input    string
+		Expected string
+	}{
+		// RFC 854 mandates CRLF, but bare LF is common in the wild and must strip too.
+		{
+			Input:    "root\r\n",
+			Expected: "root",
+		},
+		{
+			Input:    "root\n",
+			Expected: "root",
+		},
+
+		// Only the current line is consumed; trailing data stays in the reader.
+		{
+			Input:    "root\r\nrest",
+			Expected: "root",
+		},
+		{
+			Input:    "root\nrest",
+			Expected: "root",
+		},
+
+		// Empty lines.
+		{
+			Input:    "\r\n",
+			Expected: "",
+		},
+		{
+			Input:    "\n",
+			Expected: "",
+		},
+
+		// Repeated terminators strip fully, interior carriage returns survive.
+		{
+			Input:    "root\r\r\n",
+			Expected: "root",
+		},
+		{
+			Input:    "ro\rot\r\n",
+			Expected: "ro\rot",
+		},
+	}
+
+	for _, test := range tests {
+		actual, err := ReadLine(bytes.NewReader([]byte(test.Input)))
+		if err != nil {
+			t.Errorf("ReadLine(%q) returned error: %v", test.Input, err)
+			continue
+		}
+
+		if actual != test.Expected {
+			t.Errorf("ReadLine(%q) = %q, expected %q", test.Input, actual, test.Expected)
+		}
+	}
+}
