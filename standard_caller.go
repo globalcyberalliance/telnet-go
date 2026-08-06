@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -24,7 +25,12 @@ func (caller internalStandardCaller) CallTELNET(ctx context.Context, w io.Writer
 }
 
 func standardCallerCallTELNET(stdin io.ReadCloser, stdout io.WriteCloser, stderr io.WriteCloser, w io.Writer, r io.Reader) {
+	received := make(chan struct{})
+	out := &stopWriter{w: stdout}
+
 	go func(writer io.Writer, reader io.Reader) {
+		defer close(received)
+
 		var buffer [1]byte // Seems like the length of the buffer needs to be small, otherwise will have to wait for buffer to fill up.
 		p := buffer[:]
 
@@ -41,7 +47,7 @@ func standardCallerCallTELNET(stdin io.ReadCloser, stdout io.WriteCloser, stderr
 				return
 			}
 		}
-	}(stdout, r)
+	}(out, r)
 
 	var buffer bytes.Buffer
 	var p []byte
@@ -70,8 +76,38 @@ func standardCallerCallTELNET(stdin io.ReadCloser, stdout io.WriteCloser, stderr
 		buffer.Reset()
 	}
 
-	// Wait to receive data from the server (that we would send to io.Stdout).
-	time.Sleep(3 * time.Millisecond)
+	// Wait to receive data from the server (that we would send to io.Stdout). Not unconditionally:
+	// against a live connection the reader only ends when the server hangs up.
+	select {
+	case <-received:
+	case <-time.After(3 * time.Millisecond):
+		out.stop()
+	}
+}
+
+// stopWriter serialises writes to an underlying writer. Once stop returns, nothing else is written,
+// which lets a caller give up on the reader goroutine without racing its final write.
+type stopWriter struct {
+	w       io.Writer
+	mu      sync.Mutex
+	stopped bool
+}
+
+func (sw *stopWriter) Write(p []byte) (int, error) {
+	sw.mu.Lock()
+	defer sw.mu.Unlock()
+
+	if sw.stopped {
+		return len(p), nil
+	}
+
+	return sw.w.Write(p)
+}
+
+func (sw *stopWriter) stop() {
+	sw.mu.Lock()
+	sw.stopped = true
+	sw.mu.Unlock()
 }
 
 func scannerSplitFunc(data []byte, atEOF bool) (advance int, token []byte, err error) {

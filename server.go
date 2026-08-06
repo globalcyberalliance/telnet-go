@@ -28,6 +28,7 @@ func Serve(listener net.Listener, handler HandlerFunc) error {
 type (
 	// Server defines parameters of a running TELNET server.
 	Server struct {
+		closed       bool // set by Shutdown; guarded by handlesMu
 		listener     net.Listener
 		ConnCallback func(ctx context.Context, conn net.Conn) net.Conn        // optional callback for wrapping net.Conn before handling
 		ConnContext  func(ctx context.Context, conn net.Conn) context.Context // optional callback for wrapping context.Context before handling
@@ -67,7 +68,19 @@ func (server *Server) ListenAndServe() error {
 
 // Serve accepts an incoming TELNET client connection on the net.Listener 'listener'.
 func (server *Server) Serve(listener net.Listener) error {
+	server.handlesMu.Lock()
+
+	if server.closed {
+		server.handlesMu.Unlock()
+		listener.Close()
+
+		return errors.New("server closed")
+	}
+
 	if server.listener != nil {
+		server.handlesMu.Unlock()
+		listener.Close()
+
 		return errors.New("server already listening")
 	}
 
@@ -75,9 +88,11 @@ func (server *Server) Serve(listener net.Listener) error {
 		server.logger = slog.New(slog.DiscardHandler)
 	}
 
-	defer listener.Close()
 	server.listener = listener
 	server.handles = make(map[string]context.CancelFunc)
+	server.handlesMu.Unlock()
+
+	defer listener.Close()
 
 	handler := server.Handler
 	if handler == nil {
@@ -132,25 +147,36 @@ func (server *Server) SetLogger(logger *slog.Logger) {
 }
 
 func (server *Server) Shutdown() error {
-	if server.listener != nil {
-		if err := server.listener.Close(); err != nil {
-			return fmt.Errorf("failed to close listener: %w", err)
+	// Copy the cancel funcs and release the lock before calling them: a cancelled handle reacquires
+	// this mutex to remove itself from the map.
+	server.handlesMu.Lock()
+
+	listener := server.listener
+	server.listener = nil
+	server.closed = true
+
+	cancels := make([]context.CancelFunc, 0, len(server.handles))
+
+	for _, cancel := range server.handles {
+		cancels = append(cancels, cancel)
+	}
+
+	server.handlesMu.Unlock()
+
+	var err error
+
+	// Serve closes the listener on its way out, so an already closed listener is not a failure.
+	if listener != nil {
+		if closeErr := listener.Close(); closeErr != nil && !errors.Is(closeErr, net.ErrClosed) {
+			err = fmt.Errorf("failed to close listener: %w", closeErr)
 		}
 	}
 
-	wg := sync.WaitGroup{}
-	wg.Add(len(server.handles))
-
-	for _, cancel := range server.handles {
-		go func() {
-			defer wg.Done()
-			cancel()
-		}()
+	for _, cancel := range cancels {
+		cancel()
 	}
 
-	wg.Wait()
-
-	return nil
+	return err
 }
 
 // handle manages the lifecycle of a TELNET client connection.
@@ -164,21 +190,36 @@ func (server *Server) handle(conn serverConn, handler HandlerFunc) {
 		}
 	}()
 
-	// Close the handle if context is cancelled.
-	go func() {
-		server.handlesMu.Lock()
-		server.handles[conn.RemoteAddr().String()] = conn.cancel
-		server.handlesMu.Unlock()
+	addr := conn.RemoteAddr().String()
 
+	// Register before doing any work: a connection that is only registered by the goroutine below is
+	// invisible to a Shutdown that runs before that goroutine is scheduled.
+	server.handlesMu.Lock()
+	closed := server.closed
+
+	if !closed {
+		server.handles[addr] = conn.cancel
+	}
+
+	server.handlesMu.Unlock()
+
+	// Shutdown already walked the map, so this connection has to cancel itself.
+	if closed {
+		conn.cancel()
+		return
+	}
+
+	// Close the handle if context is canceled.
+	go func() {
 		<-conn.ctx.Done()
-		server.logger.Debug("received context completion, closing telnet connection", "from", conn.RemoteAddr().String())
+		server.logger.Debug("received context completion, closing telnet connection", "from", addr)
 
 		if err := conn.Conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
-			server.logger.Error("failed to close telnet connection", "from", conn.RemoteAddr().String(), "err", err)
+			server.logger.Error("failed to close telnet connection", "from", addr, "err", err)
 		}
 
 		server.handlesMu.Lock()
-		delete(server.handles, conn.RemoteAddr().String())
+		delete(server.handles, addr)
 		server.handlesMu.Unlock()
 	}()
 
