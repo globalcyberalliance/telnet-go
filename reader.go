@@ -8,19 +8,33 @@ import (
 )
 
 const (
-	ECHO     byte = 1
-	SGA      byte = 3
+	// The NVT control codes, and the options this package names. An option is negotiated with the
+	// WILL/WONT/DO/DONT exchange below; everything else is sent as IAC and the code.
+	NUL      byte = 0  // Pads a bare carriage return, per RFC 854.
+	ECHO     byte = 1  // Option: the server echoes what the client types, which masks a password.
+	SGA      byte = 3  // Option: suppress go-ahead, which puts the client in character-at-a-time mode.
 	NL       byte = 10 // New line.
 	CR       byte = 13 // Carriage return.
-	NAWS     byte = 31
-	LINEMODE byte = 34
-	SE       byte = 240
-	SB       byte = 250
-	WILL     byte = 251
-	WONT     byte = 252
-	DO       byte = 253
-	DONT     byte = 254
-	IAC      byte = 255
+	NAWS     byte = 31 // Option: negotiate about window size, which carries the client's rows and columns.
+	LINEMODE byte = 34 // Option: the client sends whole lines rather than keystrokes.
+
+	// The commands. SE through GA are two bytes, IAC and the code; the rest take an option byte after.
+	SE   byte = 240 // End of the subnegotiation begun by SB.
+	NOP  byte = 241 // No operation.
+	DM   byte = 242 // Data mark, the synchronising byte of a TCP urgent-data interrupt.
+	BRK  byte = 243 // Break.
+	IP   byte = 244 // Interrupt process, which is what a client sends for Ctrl-C.
+	AO   byte = 245 // Abort output.
+	AYT  byte = 246 // Are you there, a liveness check expecting any visible answer.
+	EC   byte = 247 // Erase character.
+	EL   byte = 248 // Erase line.
+	GA   byte = 249 // Go ahead, which only a half-duplex client without SGA waits for.
+	SB   byte = 250 // Begin a subnegotiation, ended by IAC SE.
+	WILL byte = 251 // The sender offers to enable an option.
+	WONT byte = 252 // The sender refuses, or stops, an option.
+	DO   byte = 253 // The sender asks the other side to enable an option.
+	DONT byte = 254 // The sender asks the other side to stop an option.
+	IAC  byte = 255 // Interpret as command: introduces every command, and doubled is a literal 255.
 )
 
 // reader handles un-escaping data according to the TELNET protocol.
@@ -114,7 +128,9 @@ func (r *reader) Read(data []byte) (n int, err error) {
 						}
 					}
 				}
-			case SE:
+			case SE, NOP, DM, BRK, IP, AO, AYT, EC, EL, GA:
+				// The two-byte commands of RFC 854. A client sends IAC IP for Ctrl-C and IAC AYT for a
+				// liveness check, so treating either as corruption would drop the connection mid-session.
 				if _, err = r.buffered.Discard(1); err != nil {
 					return n, err
 				}
@@ -132,6 +148,10 @@ func (r *reader) Read(data []byte) (n int, err error) {
 	return n, nil
 }
 
+// maxEmptyReads bounds how many times a read that returns nothing without failing is retried, matching what
+// bufio allows before it gives up.
+const maxEmptyReads = 100
+
 // ReadLine is a helper function to read a line from the Telnet client.
 //
 // This doesn't really work for reading from servers, as servers may not finish a line with a \r or \n (e.g. an auth
@@ -141,19 +161,61 @@ func ReadLine(reader io.Reader) (string, error) {
 	var buffer [1]byte
 	p := buffer[:]
 
+	readByte := func() (byte, error) {
+		// A reader may return nothing without failing, as this one does for a run of commands with no data
+		// behind it. Retrying is how the next byte is reached, but a reader that never progresses would
+		// otherwise spin, so it is bounded the way bufio bounds its own.
+		for range maxEmptyReads {
+			n, err := reader.Read(p)
+			if n > 0 {
+				return p[0], nil
+			}
+
+			if err != nil {
+				return 0, err
+			}
+		}
+
+		return 0, io.ErrNoProgress
+	}
+
 	for {
-		n, err := reader.Read(p)
-		if n <= 0 && err == nil {
-			continue
-		} else if n <= 0 && err != nil {
+		b, err := readByte()
+		if err != nil {
 			return "", err
 		}
 
-		line.WriteByte(p[0])
+		if b == NL {
+			line.WriteByte(b)
 
-		if p[0] == NL {
 			break
 		}
+
+		if b != CR {
+			line.WriteByte(b)
+
+			continue
+		}
+
+		// RFC 854 requires a CR to be followed by LF for a new line or NUL for a carriage return alone.
+		// A client in character-at-a-time mode sends ENTER as CR NUL, so that ends the line too; a CR
+		// followed by anything else is data, which keeps both bytes.
+		next, err := readByte()
+		if err != nil {
+			return "", err
+		}
+
+		line.WriteByte(CR)
+
+		if next == NUL || next == NL {
+			if next == NL {
+				line.WriteByte(NL)
+			}
+
+			break
+		}
+
+		line.WriteByte(next)
 	}
 
 	// Remove the line terminator. RFC 854 mandates CRLF, but plenty of clients send a bare LF, so

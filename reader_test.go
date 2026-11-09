@@ -2,6 +2,7 @@ package telnet
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"testing"
 )
@@ -351,6 +352,21 @@ func TestReadLine(t *testing.T) {
 			Input:    "ro\rot\r\n",
 			Expected: "ro\rot",
 		},
+
+		// A client in character-at-a-time mode sends ENTER as CR NUL, which ends the line (RFC 854).
+		// A NUL not following a CR is padding, not a terminator, so it does not end one.
+		{
+			Input:    "root\r\x00",
+			Expected: "root",
+		},
+		{
+			Input:    "\r\x00",
+			Expected: "",
+		},
+		{
+			Input:    "root\r\x00rest",
+			Expected: "root",
+		},
 	}
 
 	for _, test := range tests {
@@ -363,5 +379,16 @@ func TestReadLine(t *testing.T) {
 		if actual != test.Expected {
 			t.Errorf("ReadLine(%q) = %q, expected %q", test.Input, actual, test.Expected)
 		}
+	}
+}
+
+// stalledReader never fails and never produces a byte, which is what the retry bound exists for.
+type stalledReader struct{}
+
+func (stalledReader) Read([]byte) (int, error) { return 0, nil }
+
+func TestReadLineGivesUpOnAReaderThatNeverProgresses(t *testing.T) {
+	if _, err := ReadLine(stalledReader{}); !errors.Is(err, io.ErrNoProgress) {
+		t.Errorf("ReadLine(stalled) = %v, want %v", err, io.ErrNoProgress)
 	}
 }

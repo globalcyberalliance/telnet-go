@@ -230,13 +230,8 @@ func (server *Server) handle(conn serverConn, handler HandlerFunc) {
 	r := newReader(conn)
 	w := newWriter(conn)
 
-	// TODO: handle real protocol negotiation
-	// Disable SGA by default. Clients connecting without defining a host port negotiate SGA, which causes ENTER to be
-	// handled incorrectly if the server enables and disables echoing (e.g. to mask the user's password during auth).
-	if _, err := WriteCommand(w, IAC, WONT, SGA); err != nil {
-		return
-	}
-
+	// Negotiation belongs to the handler: anything written here lands in front of its own options, and a
+	// handler emulating a particular telnetd needs its handshake to be exactly that one.
 	handler.ServeTELNET(&Session{
 		ctx:    conn.ctx,
 		Conn:   conn,
